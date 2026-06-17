@@ -5,6 +5,7 @@ class InventoryItem(BaseModel):
     brand: str
     product_name: str
     sku_identifier: Optional[str] = None
+    fill_level: Optional[str] = None   # FULL / MEDIUM / LOW / EMPTY (primary metric)
     units_currently_visible: int
     shelf_capacity_estimate: int
     confidence: str

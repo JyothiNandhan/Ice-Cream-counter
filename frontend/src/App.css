@@ -241,6 +241,22 @@ h3 {
 .badge-MEDIUM { background-color: var(--warning-color); color: #000; }
 .badge-LOW { background-color: var(--success-color); }
 
+/* fill_level badges */
+.badge-FULL { background-color: var(--success-color); }
+.badge-EMPTY { background-color: var(--error-color); }
+
+/* Count disclaimer banner */
+.count-disclaimer {
+  font-size: 0.8rem;
+  color: #795548;
+  text-align: center;
+  margin-bottom: 1rem;
+  padding: 0.5rem 0.75rem;
+  background: #fff3e0;
+  border: 1px solid #ffe0b2;
+  border-radius: var(--radius-sm);
+}
+
 .units-display {
   display: flex;
   justify-content: space-between;
@@ -297,4 +313,41 @@ h3 {
 
 .error-card p {
   margin-bottom: 1rem;
+}
+
+/* History View */
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.history-card {
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.history-card:active {
+  border-color: var(--primary-color);
+}
+
+.history-expanded {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--border-color);
+  padding-top: 0.75rem;
+}
+
+.history-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.9rem;
+  gap: 0.5rem;
+}
+
+.history-row:last-child {
+  border-bottom: none;
 }

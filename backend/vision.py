@@ -24,19 +24,25 @@ VISION_PROMPT = """You are an expert retail inventory analyst inspecting a freez
 
 Look at every shelf in this photo very carefully.
 
-For EACH distinct ice cream product you can see, count the exact number of tubs, boxes, cones, or packages present and identify the brand and flavor.
+For EACH distinct ice cream product you can see, assess its stock level and identify the brand and flavor.
 
 Return a JSON array where each element has:
 - "brand": exact brand name on the label (e.g. "Nestle", "Haagen-Dazs", "Oreo", "Drumstick", "Toll House", "KitKat")
 - "product_name": specific flavor or variant (e.g. "Vanilla", "Oreo Mint", "Cookie Dough")
 - "sku_identifier": barcode or SKU if visible, otherwise null
-- "units_currently_visible": exact integer count of tubs/packages you see for this product
-- "shelf_capacity_estimate": your estimate of how many units fill this slot when completely full
+- "fill_level": how full this product's shelf space looks — MUST be exactly one of: "FULL", "MEDIUM", "LOW", "EMPTY"
+  - FULL: shelf slot looks ≥75% stocked (well-stocked, minimal gaps)
+  - MEDIUM: shelf slot is roughly 40–74% stocked (noticeable gaps but not sparse)
+  - LOW: shelf slot is roughly 10–39% stocked (very few items, mostly empty)
+  - EMPTY: shelf slot is <10% stocked or completely bare
+- "units_currently_visible": rough visual estimate of how many tubs/packages you see (this is approximate, not a precise count)
+- "shelf_capacity_estimate": rough estimate of how many units fill this slot when completely full
 - "confidence": "high" if label clearly readable, "medium" if partially visible, "low" if guessed
 
 Rules:
-- Count EVERY individual unit. Do not estimate — count precisely.
-- Group same products together and sum counts within this single image.
+- fill_level is the PRIMARY and most important field. Judge honestly how full each shelf looks.
+- units_currently_visible is a rough estimate only — exact counts from photos are unreliable.
+- Group same products together.
 - If a label is unreadable, use "Unknown Brand" and describe packaging color.
 - Return ONLY raw JSON array. No markdown fences. No explanation.
 
@@ -45,6 +51,7 @@ Rules:
     "brand": "Nestle",
     "product_name": "Drumstick Vanilla",
     "sku_identifier": null,
+    "fill_level": "LOW",
     "units_currently_visible": 4,
     "shelf_capacity_estimate": 8,
     "confidence": "high"
@@ -103,6 +110,13 @@ def analyze_single_image(image_bytes: bytes, image_index: int) -> list[dict]:
             raw_content = raw_content.strip()
 
             parsed = json.loads(raw_content)
+            # Compute fill_level from ratio as fallback if model omitted it
+            for p in parsed:
+                if not p.get("fill_level"):
+                    units = p.get("units_currently_visible", 0)
+                    cap = p.get("shelf_capacity_estimate", 1) or 1
+                    ratio = units / cap
+                    p["fill_level"] = "FULL" if ratio >= 0.75 else ("MEDIUM" if ratio >= 0.40 else ("LOW" if ratio >= 0.10 else "EMPTY"))
             logger.info(f"[Vision] Image {image_index + 1}: found {len(parsed)} products")
             return parsed
 
@@ -160,13 +174,17 @@ def merge_results(all_results: list[list[dict]]) -> list[dict]:
                 conf_rank = {"high": 2, "medium": 1, "low": 0}
                 if conf_rank.get(item.get("confidence", "low"), 0) > conf_rank.get(existing.get("confidence", "low"), 0):
                     existing["confidence"] = item["confidence"]
+                # Take the most optimistic fill_level (best-angle view wins)
+                fill_rank = {"EMPTY": 0, "LOW": 1, "MEDIUM": 2, "FULL": 3}
+                if fill_rank.get(item.get("fill_level", "LOW"), 1) > fill_rank.get(existing.get("fill_level", "LOW"), 1):
+                    existing["fill_level"] = item["fill_level"]
 
     result = list(merged.values())
     logger.info(f"[Vision] Merged {sum(len(r) for r in all_results)} detections → {len(result)} unique products")
     return result
 
 
-def extract_inventory(images_bytes: list[bytes], images_base64: list[str]) -> List[InventoryItem]:
+def extract_inventory(images_bytes: list[bytes]) -> List[InventoryItem]:
     n = len(images_bytes)
     logger.info(f"[Vision] Parallel analyzing {n} image(s) with nvidia/nemotron-nano-12b-v2-vl...")
 
