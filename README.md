@@ -1,91 +1,111 @@
 # Ice Cream Freezer Inventory Management System
 
-A local-first, mobile-friendly full-stack web application designed for ice cream inventory management. Users can take multiple photos of a freezer, which are analyzed using advanced multimodal vision models (mistral-small-3.1). The system automatically tracks stock, calculates restock urgency (using llama-3.3-70b-instruct), and dispatches structured inventory reports directly to stakeholders via WhatsApp.
+A local-first, mobile-friendly full-stack web application for ice cream freezer inventory management. Staff photograph the freezer from their phone, the system uses AI vision to count every product on every shelf, compares with the previous scan to calculate units sold and restock urgency, and dispatches a formatted WhatsApp report to managers — all in one tap.
+
+## Stack
+
+| Layer | Technology |
+|---|---|
+| Backend | Python 3.12 · FastAPI · SQLite |
+| Vision AI | NVIDIA NIM — `nvidia/nemotron-nano-12b-v2-vl` |
+| Report AI | NVIDIA NIM — `qwen/qwen3.5-397b-a17b` |
+| WhatsApp | CallMeBot free API |
+| Frontend | React 18 · Vite 5 (mobile-first, served on LAN) |
 
 ## Prerequisites
 
 - Python 3.10+
 - Node.js 18+
-- UF GatorLink account with Navigator Toolkit access
-- CallMeBot activated on each recipient number
+- NVIDIA NIM API keys (vision + text) — [platform.nvidia.com](https://platform.nvidia.com)
+- CallMeBot activated on each recipient number (see below)
 
-## CallMeBot Activation Steps
-For every recipient who should receive inventory reports, they must activate CallMeBot:
-1. Save `+34 644 60 49 79` as a contact on their phone.
-2. Send the message "I allow callmebot to send me messages" on WhatsApp to that contact.
-3. They will receive a personal API key instantly via WhatsApp.
-4. Add their phone number and API key to the `.env` file in the corresponding lists.
+## CallMeBot Activation
 
-## Step-by-Step Backend Setup
+Every recipient must activate CallMeBot once before they can receive reports:
 
-1. Open your terminal and navigate to the backend directory:
-   ```bash
-   cd backend
-   ```
-2. Create a virtual environment:
-   ```bash
-   python -m venv venv
-   ```
-3. Activate the virtual environment:
-   - Mac/Linux: `source venv/bin/activate`
-   - Windows: `venv\Scripts\activate`
-4. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-5. YOLOv11l Setup (automatic):
-   - No setup needed
-   - On first run yolo11l.pt downloads automatically (~49MB)
-   - Requires internet connection on first run only
-   - After first run works completely offline
-   - Model cached at: ultralytics/assets/yolo11l.pt
-6. Configure environment variables:
-   ```bash
-   cp ../.env .env
-   ```
-   *(Ensure to fill in your real `UF_API_KEY`, and CallMeBot numbers/keys in the `.env` file.)*
-7. Start the backend server:
-   ```bash
-   python main.py
-   ```
+1. Save `+34 644 60 49 79` as a contact on WhatsApp.
+2. Send `I allow callmebot to send me messages` to that contact on WhatsApp.
+3. You will receive a personal API key via WhatsApp within seconds.
+4. Add the phone number and API key to `.env`.
 
-## Step-by-Step Frontend Setup
+## Environment Variables
 
-1. Open a new terminal tab and navigate to the frontend directory:
-   ```bash
-   cd frontend
-   ```
-2. Install the necessary packages:
-   ```bash
-   npm install
-   ```
-3. Start the Vite development server:
-   ```bash
-   npm run dev
-   ```
+Copy `.env` into `backend/` and fill in all values:
 
-## Accessing on Phone Browser
+```
+NVIDIA_VISION_API_KEY=nvapi-...
+NVIDIA_TEXT_API_KEY=nvapi-...
+CALLMEBOT_NUMBERS=+1234567890,+0987654321
+CALLMEBOT_API_KEYS=abc123,xyz789
+```
 
-1. Find your laptop's local IP address:
-   - Mac/Linux: Run `ifconfig | grep "inet "`
-   - Windows: Run `ipconfig`
-2. Ensure your phone and laptop are connected to the **same WiFi network**.
-3. Open a browser on your phone and go to: `http://YOUR_LAPTOP_IP:5173`
+`CALLMEBOT_NUMBERS` and `CALLMEBOT_API_KEYS` are comma-separated lists of equal length.
 
-## How to Use the App
+## Backend Setup
 
-1. Open the app on your mobile device as directed above.
-2. Tap **"📷 Take Photo"** to capture live photos of the freezer from multiple angles (or use **"🖼️ Gallery"** to select existing photos).
-3. Review the thumbnails in the preview grid (you can tap ✕ to remove any bad shots).
-4. Tap **"Analyze Freezer 🔍"**.
-5. Wait for the analysis to complete. The app will show a breakdown of each identified brand, current units, restocked/sold amounts, and a restock urgency badge.
-6. The app will display a confirmation that the WhatsApp inventory report was successfully delivered to the configured numbers.
-7. Tap **"Scan Again"** to start a new scan.
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+cp ../.env .env
+python main.py                  # starts on http://0.0.0.0:8000
+```
+
+## Frontend Setup
+
+```bash
+cd frontend
+npm install
+npm run dev                     # starts on http://0.0.0.0:5173
+```
+
+## Accessing on a Phone
+
+1. Find your laptop's local IP:
+   - Mac/Linux: `ifconfig | grep "inet "`
+   - Windows: `ipconfig`
+2. Make sure phone and laptop are on the **same WiFi network**.
+3. Open `http://YOUR_LAPTOP_IP:5173` on the phone browser.
+
+## How to Use
+
+1. Tap **📷 Take Photo** to capture the freezer (or **🖼️ Gallery** to pick existing photos).
+2. Add photos from multiple angles — the system deduplicates overlapping views automatically.
+3. Tap **Analyze Freezer 🔍** and wait ~10–20 seconds.
+4. Review the report: each product shows current units, capacity, units sold since last scan, and a restock urgency badge (🔴 CRITICAL / 🟡 MEDIUM / 🟢 LOW).
+5. The WhatsApp report is sent automatically to all configured numbers.
+6. Tap **📋 View Scan History** to browse past scans and track trends.
+
+## API Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/analyze` | Upload images, run full pipeline, return report |
+| `GET` | `/history?limit=20` | List past scans with summary stats |
+| `GET` | `/scan/{id}` | Full detail for a specific scan |
+| `GET` | `/health` | Liveness check |
+
+## How the Pipeline Works
+
+```
+Photos → Vision model (parallel per image)
+       → Merge results (MAX count per product across angles)
+       → Save raw scan to SQLite
+       → Compare with previous scan
+       → LLM agent: compute units_sold, urgency, WhatsApp message
+       → Save enriched report back to SQLite
+       → Send WhatsApp to all configured numbers
+       → Return AnalyzeResponse to frontend
+```
+
+**Deduplication:** When the same product appears in multiple photos (different angles of the same shelf), the system takes the maximum unit count rather than summing — preventing double-counting.
+
+**Agent resilience:** The LLM call retries up to 3 times with exponential backoff. If all retries fail, a local fallback computes urgency from the vision data so the app always returns a usable result.
 
 ## Troubleshooting
 
-- **CORS errors:** Ensure your FastAPI application CORS settings (`main.py`) allow all origins or specifically your laptop IP.
-- **Camera not opening:** Mobile browsers restrict camera access to HTTPS or `localhost` / `127.0.0.1`. If accessing via a local IP (`192.168.x.x`), you must use HTTP unless you set up SSL certs. Some browsers may block camera access over plain HTTP on LAN. Use Safari/Chrome setting exceptions or test using ngrok.
-- **WhatsApp not sending:** Verify that the CallMeBot API key is perfectly matched to the recipient's phone number in `.env` and that they followed the activation steps.
-- **Vision model errors:** Ensure your `UF_API_KEY` is correct in `.env`.
-- **Can't reach server on phone:** Verify your laptop and phone are on the exact same WiFi. Check your laptop's firewall to ensure it allows traffic on ports 5173 and 8000. Ensure you're using the correct IP address.
+- **Camera not opening on phone:** Mobile browsers restrict camera access to HTTPS or `localhost`. On a LAN IP over plain HTTP, use Safari (iOS) or try enabling the Chrome flag `chrome://flags/#unsafely-treat-insecure-origin-as-secure`.
+- **WhatsApp not sending:** Confirm the CallMeBot API key matches the exact phone number in `.env`, and that the recipient completed the activation step.
+- **NVIDIA API errors:** Check that both `NVIDIA_VISION_API_KEY` and `NVIDIA_TEXT_API_KEY` are set and have sufficient credits.
+- **Can't reach server from phone:** Verify both devices are on the same WiFi, and check your laptop firewall allows inbound traffic on ports `5173` and `8000`.

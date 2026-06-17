@@ -1,5 +1,3 @@
-import React from 'react';
-
 export default function GalleryUpload({ onPhotosAdded }) {
   const handleChange = (e) => {
     if (e.target.files && e.target.files.length > 0) {

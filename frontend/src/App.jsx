@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import CameraCapture from './components/CameraCapture';
 import GalleryUpload from './components/GalleryUpload';
 import PhotoGrid from './components/PhotoGrid';
 import AnalyzeButton from './components/AnalyzeButton';
 import ReportDisplay from './components/ReportDisplay';
+import HistoryView from './components/HistoryView';
 import { analyzeFreezer } from './api/client';
 
 export default function App() {
@@ -11,10 +12,10 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [reportData, setReportData] = useState(null);
   const [error, setError] = useState(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   const handlePhotosAdded = (newPhotos) => {
     setPhotos(prev => [...prev, ...newPhotos]);
-    // Clear errors when new photos are added
     if (error) setError(null);
   };
 
@@ -23,37 +24,43 @@ export default function App() {
   };
 
   const handleAnalyze = async () => {
-    if (photos.length === 0) return;
-    
+    if (photos.length === 0 || isAnalyzing) return;
     setIsAnalyzing(true);
     setError(null);
-    
     try {
       const result = await analyzeFreezer(photos);
       setReportData(result);
     } catch (err) {
-      if (err.message === 'Failed to fetch') {
-        setError('Could not reach server. Check WiFi connection.');
-      } else {
-        setError(err.message || 'Could not analyze photos. Please try again.');
-      }
+      setError(
+        err.message === 'Failed to fetch'
+          ? 'Could not reach server. Check WiFi connection.'
+          : err.message || 'Could not analyze photos. Please try again.'
+      );
     } finally {
       setIsAnalyzing(false);
     }
   };
 
   const handleReset = () => {
-    // Revoke object URLs to avoid memory leaks
     photos.forEach(photo => URL.revokeObjectURL(photo.previewUrl));
     setPhotos([]);
     setReportData(null);
     setError(null);
   };
 
+  if (showHistory) {
+    return (
+      <div className="app-container">
+        <h1>🧊 Ice Cream Inventory</h1>
+        <HistoryView onClose={() => setShowHistory(false)} />
+      </div>
+    );
+  }
+
   return (
     <div className="app-container">
       <h1>🧊 Ice Cream Inventory</h1>
-      
+
       {!reportData ? (
         <>
           <div className="action-buttons">
@@ -66,17 +73,29 @@ export default function App() {
           {error && (
             <div className="card error-card">
               <p>⚠️ {error}</p>
-              <button className="btn btn-secondary" onClick={() => setError(null)} style={{minHeight: '40px', padding: '0.5rem'}}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setError(null)}
+                style={{ minHeight: '40px', padding: '0.5rem' }}
+              >
                 Dismiss
               </button>
             </div>
           )}
 
-          <AnalyzeButton 
-            onClick={handleAnalyze} 
-            isLoading={isAnalyzing} 
-            disabled={photos.length === 0} 
+          <AnalyzeButton
+            onClick={handleAnalyze}
+            isLoading={isAnalyzing}
+            disabled={photos.length === 0}
           />
+
+          <button
+            className="btn btn-secondary"
+            style={{ marginTop: '0.75rem' }}
+            onClick={() => setShowHistory(true)}
+          >
+            📋 View Scan History
+          </button>
         </>
       ) : (
         <ReportDisplay reportData={reportData} onReset={handleReset} />

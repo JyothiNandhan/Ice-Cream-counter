@@ -1,5 +1,3 @@
-import React from 'react';
-
 export default function PhotoGrid({ photos, onRemove }) {
   if (!photos || photos.length === 0) {
     return null;

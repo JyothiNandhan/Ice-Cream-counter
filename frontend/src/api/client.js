@@ -1,28 +1,23 @@
+const handleErrorResponse = async (response) => {
+  let message = "Could not reach server. Please try again.";
+  try {
+    const data = await response.json();
+    if (data?.detail) message = data.detail;
+  } catch (_) {}
+  throw new Error(message);
+};
+
 export const analyzeFreezer = async (photos) => {
   const formData = new FormData();
-  
-  photos.forEach((photo) => {
-    formData.append('images', photo.file);
-  });
-  
-  // Notice we use the relative path, Vite proxy handles routing to :8000
-  const response = await fetch('/api/analyze', {
-    method: 'POST',
-    body: formData,
-  });
-  
-  if (!response.ok) {
-    let errorMessage = "Could not analyze photos. Please try again.";
-    try {
-      const errorData = await response.json();
-      if (errorData && errorData.detail) {
-        errorMessage = errorData.detail;
-      }
-    } catch (e) {
-      // If parsing fails, fall back to default error
-    }
-    throw new Error(errorMessage);
-  }
-  
-  return await response.json();
+  photos.forEach((photo) => formData.append('images', photo.file));
+
+  const response = await fetch('/api/analyze', { method: 'POST', body: formData });
+  if (!response.ok) await handleErrorResponse(response);
+  return response.json();
+};
+
+export const getHistory = async (limit = 20) => {
+  const response = await fetch(`/api/history?limit=${limit}`);
+  if (!response.ok) await handleErrorResponse(response);
+  return response.json();
 };

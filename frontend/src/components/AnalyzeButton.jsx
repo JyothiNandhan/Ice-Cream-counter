@@ -1,5 +1,3 @@
-import React from 'react';
-
 export default function AnalyzeButton({ onClick, isLoading, disabled }) {
   return (
     <button 

@@ -14,3 +14,7 @@ backend/inventory.db
 node_modules/
 dist/
 .DS_Store
+
+# ML model weights
+*.pt
+*.pth
