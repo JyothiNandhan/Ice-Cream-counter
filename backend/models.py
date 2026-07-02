@@ -28,3 +28,28 @@ class AnalyzeResponse(BaseModel):
     report: List[ReportItem]
     whatsapp_statuses: List[WhatsAppStatus]
     whatsapp_message: str
+
+class POSSaleItem(BaseModel):
+    brand: str
+    product_name: str
+    units_sold: int
+    remaining: int
+    full_stock: int
+    needs_reorder: bool
+
+class POSAnalyzeResponse(BaseModel):
+    date: str
+    items: List[POSSaleItem]
+    whatsapp_statuses: List[WhatsAppStatus]
+    whatsapp_message: str
+    critical: bool
+    items_to_reorder: List[str]
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    username: str

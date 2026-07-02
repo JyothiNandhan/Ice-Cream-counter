@@ -20,40 +20,37 @@ vision_client = OpenAI(
     base_url=NVIDIA_BASE_URL,
 )
 
-VISION_PROMPT = """You are an expert retail inventory analyst inspecting a freezer shelf photo.
+VISION_PROMPT = """You are a strict retail inventory auditor inspecting a freezer shelf photo.
 
-Look at every shelf in this photo very carefully.
+CRITICAL RULE: You may ONLY include a product if you can LITERALLY READ the brand name or product name printed on the packaging in this photo. If you cannot read actual text/logo on the label with certainty, do NOT include it — use "Unknown Brand" instead. Never guess a brand from packaging color, shape, or context.
 
-For EACH distinct ice cream product you can see, assess its stock level and identify the brand and flavor.
-
-Return a JSON array where each element has:
-- "brand": exact brand name on the label (e.g. "Nestle", "Haagen-Dazs", "Oreo", "Drumstick", "Toll House", "KitKat")
-- "product_name": specific flavor or variant (e.g. "Vanilla", "Oreo Mint", "Cookie Dough")
+For EACH distinct ice cream product whose label you can clearly read, return a JSON entry with:
+- "brand": brand name exactly as printed on the visible label (MUST be readable in the photo)
+- "product_name": flavor/variant as printed on the label (MUST be readable, otherwise "Unknown Flavor")
 - "sku_identifier": barcode or SKU if visible, otherwise null
-- "fill_level": how full this product's shelf space looks — MUST be exactly one of: "FULL", "MEDIUM", "LOW", "EMPTY"
-  - FULL: shelf slot looks ≥75% stocked (well-stocked, minimal gaps)
-  - MEDIUM: shelf slot is roughly 40–74% stocked (noticeable gaps but not sparse)
-  - LOW: shelf slot is roughly 10–39% stocked (very few items, mostly empty)
-  - EMPTY: shelf slot is <10% stocked or completely bare
-- "units_currently_visible": rough visual estimate of how many tubs/packages you see (this is approximate, not a precise count)
-- "shelf_capacity_estimate": rough estimate of how many units fill this slot when completely full
-- "confidence": "high" if label clearly readable, "medium" if partially visible, "low" if guessed
+- "fill_level": how full this product's shelf slot looks — MUST be exactly one of: "FULL", "MEDIUM", "LOW", "EMPTY"
+  - FULL: slot ≥75% stocked (minimal gaps)
+  - MEDIUM: slot 40–74% stocked (noticeable gaps)
+  - LOW: slot 10–39% stocked (mostly empty)
+  - EMPTY: slot <10% stocked or bare
+- "units_currently_visible": rough visual count of tubs/packages visible (approximate)
+- "shelf_capacity_estimate": rough estimate of how many units fill this slot when full
+- "confidence": "high" if brand AND flavor text clearly legible, "medium" if partially visible but still readable, "low" if guessing
 
-Rules:
-- fill_level is the PRIMARY and most important field. Judge honestly how full each shelf looks.
-- units_currently_visible is a rough estimate only — exact counts from photos are unreliable.
-- Group same products together.
-- If a label is unreadable, use "Unknown Brand" and describe packaging color.
-- Return ONLY raw JSON array. No markdown fences. No explanation.
+RULES:
+- DO NOT hallucinate or infer brands you cannot actually read. When in doubt, omit the product.
+- One entry per distinct product. Group same products together.
+- If label text is unreadable, use brand="Unknown Brand", product_name="[color] packaging".
+- Return ONLY raw JSON array. No markdown. No explanation.
 
 [
   {{
-    "brand": "Nestle",
-    "product_name": "Drumstick Vanilla",
+    "brand": "KitKat",
+    "product_name": "Ice Cream",
     "sku_identifier": null,
-    "fill_level": "LOW",
-    "units_currently_visible": 4,
-    "shelf_capacity_estimate": 8,
+    "fill_level": "MEDIUM",
+    "units_currently_visible": 6,
+    "shelf_capacity_estimate": 12,
     "confidence": "high"
   }}
 ]"""
@@ -94,7 +91,7 @@ def analyze_single_image(image_bytes: bytes, image_index: int) -> list[dict]:
         try:
             logger.info(f"[Vision] Image {image_index + 1}: attempt {attempt + 1}/{max_retries}")
             response = vision_client.chat.completions.create(
-                model="nvidia/nemotron-nano-12b-v2-vl",
+                model="meta/llama-3.2-90b-vision-instruct",
                 messages=messages,
                 temperature=0.0,
                 max_tokens=2048,
@@ -117,6 +114,11 @@ def analyze_single_image(image_bytes: bytes, image_index: int) -> list[dict]:
                     cap = p.get("shelf_capacity_estimate", 1) or 1
                     ratio = units / cap
                     p["fill_level"] = "FULL" if ratio >= 0.75 else ("MEDIUM" if ratio >= 0.40 else ("LOW" if ratio >= 0.10 else "EMPTY"))
+            # Drop low-confidence detections — they are almost always hallucinations
+            before = len(parsed)
+            parsed = [p for p in parsed if p.get("confidence", "low") != "low"]
+            if len(parsed) < before:
+                logger.info(f"[Vision] Image {image_index + 1}: dropped {before - len(parsed)} low-confidence detections")
             logger.info(f"[Vision] Image {image_index + 1}: found {len(parsed)} products")
             return parsed
 
@@ -186,7 +188,7 @@ def merge_results(all_results: list[list[dict]]) -> list[dict]:
 
 def extract_inventory(images_bytes: list[bytes]) -> List[InventoryItem]:
     n = len(images_bytes)
-    logger.info(f"[Vision] Parallel analyzing {n} image(s) with nvidia/nemotron-nano-12b-v2-vl...")
+    logger.info(f"[Vision] Parallel analyzing {n} image(s) with qwen/qwen2.5-vl-72b-instruct...")
 
     # Fire all image API calls in parallel using a thread pool
     all_results: list[list[dict]] = [None] * n

@@ -6,11 +6,17 @@ from fastapi.responses import JSONResponse
 from typing import List
 import logging
 
-from database import init_db, save_scan, get_previous_scan, update_scan_report, get_scan_history, get_scan_by_id
+from database import (
+    init_db, save_scan, get_previous_scan, update_scan_report,
+    get_scan_history, get_scan_by_id, get_supervisor, create_supervisor,
+)
 from vision import extract_inventory
 from agent import generate_report
 from whatsapp import send_to_all
-from models import AnalyzeResponse
+from pos_analyzer import extract_pos_sales, calculate_inventory, build_pos_whatsapp_message
+from auth import verify_password, hash_password, create_access_token
+from stock_routes import router as stock_router
+from models import AnalyzeResponse, POSAnalyzeResponse, POSSaleItem, LoginRequest, TokenResponse
 import config
 
 logging.basicConfig(level=logging.INFO)
@@ -26,10 +32,26 @@ app.add_middleware(
 )
 
 
+app.include_router(stock_router)
+
+
 @app.on_event("startup")
 async def startup_event():
     logger.info("Initializing database...")
     init_db()
+    # Seed default supervisor if none exists
+    if not get_supervisor("supervisor"):
+        create_supervisor("supervisor", hash_password("admin123"))
+        logger.info("Default supervisor created: supervisor / admin123")
+
+
+@app.post("/auth/login", response_model=TokenResponse)
+async def login(body: LoginRequest):
+    supervisor = get_supervisor(body.username)
+    if not supervisor or not verify_password(body.password, supervisor["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    token = create_access_token(body.username)
+    return TokenResponse(access_token=token, username=body.username)
 
 
 @app.exception_handler(Exception)
@@ -112,6 +134,43 @@ async def analyze_freezer(images: List[UploadFile] = File(...)):
         report=structured_report,
         whatsapp_statuses=whatsapp_statuses,
         whatsapp_message=whatsapp_message,
+    )
+
+
+@app.post("/analyze-pos", response_model=POSAnalyzeResponse)
+async def analyze_pos(image: UploadFile = File(...)):
+    """Mode 2: Upload a POS sales report screenshot → math-based inventory → WhatsApp alert."""
+    if not image:
+        raise HTTPException(status_code=400, detail="No image provided")
+
+    image_bytes = await image.read()
+    date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # 1. OCR the POS image to get units sold per product
+    try:
+        sales_data = await asyncio.to_thread(extract_pos_sales, image_bytes)
+    except Exception as e:
+        logger.error(f"POS extraction failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to read POS image: {str(e)}")
+
+    # 2. Pure math — no AI needed here
+    inventory = calculate_inventory(sales_data)
+
+    # 3. Build WhatsApp message
+    message = build_pos_whatsapp_message(inventory, date_str)
+
+    # 4. Send WhatsApp
+    whatsapp_statuses = await send_to_all(message)
+
+    items_to_reorder = [i["product_name"] for i in inventory if i["needs_reorder"]]
+
+    return POSAnalyzeResponse(
+        date=date_str,
+        items=[POSSaleItem(**i) for i in inventory],
+        whatsapp_statuses=whatsapp_statuses,
+        whatsapp_message=message,
+        critical=len(items_to_reorder) > 1,
+        items_to_reorder=items_to_reorder,
     )
 
 
